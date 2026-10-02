@@ -19,8 +19,14 @@ class Quiet(unittest.TestCase):
     def setUp(self):
         self._quiet = contextlib.redirect_stdout(io.StringIO())
         self._quiet.__enter__()
+        # never write into the real CI run's summary/outputs from a test
+        self._env = mock.patch.dict(os.environ)
+        self._env.start()
+        for key in ("GITHUB_STEP_SUMMARY", "GITHUB_OUTPUT"):
+            os.environ.pop(key, None)
 
     def tearDown(self):
+        self._env.stop()
         self._quiet.__exit__(None, None, None)
 
 
