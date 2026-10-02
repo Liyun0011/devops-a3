@@ -1,5 +1,5 @@
-# Agentic automation: when an issue is opened, a model on GitHub Models
-# classifies it, the job applies allowlisted labels and comments a summary
+# Agentic automation: when an issue is opened, an LLM (any OpenAI-compatible
+# API; default Gemini - GitHub Models was retired on 2026-07-30) classifies it, the job applies allowlisted labels and comments a summary
 # plus draft acceptance criteria. Issue text reaches the script only through
 # env variables (never ${{ }} inside run:), which prevents script injection.
 name: AI Issue Triage
@@ -15,8 +15,7 @@ on:
 
 permissions:
   contents: read
-  issues: write      # labels + comment
-  models: read       # GitHub Models inference, no extra secret needed
+  issues: write      # labels + comment (the LLM key never touches GitHub)
 
 concurrency:
   group: triage-${{ github.event.issue.number || inputs.issue_number }}
@@ -31,11 +30,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Triage with GitHub Models
+      - name: Triage with an LLM
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          MODELS_URL: ${{ vars.MODELS_URL }}
           ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
-          TRIAGE_MODEL: ${{ vars.TRIAGE_MODEL || 'openai/gpt-4o-mini' }}
+          TRIAGE_MODEL: ${{ vars.TRIAGE_MODEL }}
         run: python3 scripts/triage_issue.py
