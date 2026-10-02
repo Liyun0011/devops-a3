@@ -129,6 +129,29 @@ class TestMain(Quiet):
         self.assertIn("Sorry, I cannot help.", out.getvalue())
         self.assertEqual(self_payload[0]["response_format"], {"type": "json_object"})
 
+    def test_non_json_body_is_described_and_legacy_endpoint_is_tried(self):
+        class Resp(io.BytesIO):
+            status = 200
+            headers = {"Content-Type": "text/html"}
+            def geturl(self):
+                return "https://example.test/login"
+        tried = []
+
+        def fake_urlopen(req, timeout=0):
+            tried.append(req.full_url)
+            if "azure" in req.full_url:
+                body = json.dumps({"choices": [{"message": {"content": GOOD}}]}).encode()
+                r = Resp(body); r.headers = {"Content-Type": "application/json"}
+                return r
+            return Resp(b"<html>Sign in</html>")
+        gh = ti.GitHub("t", "o/r")
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            content = gh.ask_model(ti.DEFAULT_URL, "openai/gpt-4o-mini", [])
+        self.assertEqual(ti.parse_reply(content)["type"], "bug")
+        self.assertEqual(len(tried), 2)
+        err = ti.BadResponse("HTTP 200 text/html from x: <html>")
+        self.assertIn("text/html", ti.describe(err))
+
     def test_dry_run_fetches_issue_and_writes_nothing(self):
         writes = []
 
