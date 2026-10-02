@@ -1,0 +1,54 @@
+# Pull-request quality gate:
+#  1. unit tests on a Python version matrix
+#  2. README marker validation (fails CI if markers are missing/broken)
+#  3. dry-run preview of the README change, shown in the PR "Checks" summary
+name: README CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths: ["README.md", "scripts/**", "tests/**", ".github/workflows/**"]
+
+permissions:
+  contents: read             # CI never writes; preview uses the read-only GITHUB_TOKEN
+
+concurrency:
+  group: readme-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -v
+
+  validate-markers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 scripts/update_readme.py --check
+
+  preview:
+    if: github.event_name == 'pull_request'
+    needs: [validate-markers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Dry-run README update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # no secrets needed; also safe for fork PRs
+          ACTIVITY_REPOS: ${{ vars.ACTIVITY_REPOS || github.repository }}
+          ACTIVITY_USER: ${{ vars.ACTIVITY_USER }}
+        run: python3 scripts/update_readme.py --dry-run
