@@ -24,6 +24,8 @@ Environment
   ISSUE_NUMBER       issue to triage
   ISSUE_TITLE/BODY   optional; fetched from the API when missing
   TRIAGE_MODEL       default gemini-3.8-flash
+  TRIAGE_MAX_TOKENS  output budget, default 2048 (thinking models spend part
+                     of it on reasoning, so small values truncate the JSON)
   MODELS_URL         default Gemini's OpenAI-compatible chat/completions URL
 """
 from __future__ import annotations
@@ -164,7 +166,11 @@ class GitHub:
     def ask_model(self, url: str, model: str, messages: list[dict], key: str) -> str:
         """One chat-completions call. JSON mode is requested; if the provider
         rejects that parameter (HTTP 400) the call is retried without it."""
-        payload = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 400,
+        try:
+            budget = int(os.environ.get("TRIAGE_MAX_TOKENS") or 2048)
+        except ValueError:
+            budget = 2048
+        payload = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": budget,
                    "response_format": {"type": "json_object"}}
         try:
             reply = self.request("POST", url, payload, token=key)
@@ -174,7 +180,10 @@ class GitHub:
             print(f"::notice::{describe(err)}; retrying without response_format")
             payload.pop("response_format")
             reply = self.request("POST", url, payload, token=key)
-        return reply["choices"][0]["message"]["content"]
+        choice = reply["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError(f"reply truncated at max_tokens={budget}; raise TRIAGE_MAX_TOKENS")
+        return choice["message"]["content"]
 
 
 def describe(err) -> str:
