@@ -6,7 +6,8 @@ Design goals
 - Cheap: conditional requests (ETag) cached in .cache/activity.json; a 304
   response does not count against the GitHub API rate limit.
 - Resilient: exponential backoff with jitter on 5xx / secondary rate limits,
-  and waits for X-RateLimit-Reset (bounded) when the primary limit is hit.
+  waits for X-RateLimit-Reset (bounded), and stops calling the API when the
+  remaining quota drops below a floor - all tunable through env variables.
 - Safe: the token is read from the environment and never printed.
 
 Modes
@@ -15,12 +16,20 @@ Modes
   --dry-run   fetch + render, print a unified diff, never write README
 
 Environment
-  GITHUB_TOKEN    token used for API calls (required except for --check)
-  ACTIVITY_REPOS  comma-separated owner/repo list (default: GITHUB_REPOSITORY)
-  ACTIVITY_USER   optional: only keep events by this login
-  MAX_ITEMS       number of lines to render (default 10)
-  README_PATH     default README.md
-  CACHE_PATH      default .cache/activity.json
+  GITHUB_TOKEN            token used for API calls (required except --check)
+  ACTIVITY_REPOS          comma-separated list; "owner/repo" or "owner/*"
+                          (= the owner's most recently pushed public repos,
+                          works for users and organisations)
+                          default: GITHUB_REPOSITORY
+  ACTIVITY_REPO_LIMIT     max repos taken from each "owner/*" (default 5)
+  ACTIVITY_USER           optional: only keep events by this login
+  MAX_ITEMS               number of lines to render (default 10)
+  README_PATH             default README.md
+  CACHE_PATH              default .cache/activity.json
+  RATE_LIMIT_MAX_RETRIES  attempts per request (default 4)
+  RATE_LIMIT_MAX_WAIT     longest sleep in seconds for a reset (default 60)
+  RATE_LIMIT_FLOOR        stop calling the API below this many remaining
+                          requests and serve cached data (default 50)
 """
 from __future__ import annotations
 
@@ -38,8 +47,14 @@ from pathlib import Path
 START = "<!--START_SECTION:activity-->"
 END = "<!--END_SECTION:activity-->"
 API = "https://api.github.com"
-MAX_ATTEMPTS = 4
-MAX_RESET_WAIT = 60  # seconds we are willing to sleep for a rate-limit reset
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        print(f"::warning::{name} is not a number; using {default}")
+        return default
 
 
 class MarkerError(Exception):
@@ -76,21 +91,97 @@ def backoff_delay(attempt: int, headers) -> float:
     return min(30.0, 2 ** attempt) + random.uniform(0, 1)
 
 
+def trim_event(ev: dict) -> dict:
+    """Keep only what rendering needs, so the committed cache stays small."""
+    p = ev.get("payload", {})
+    keep = {k: p[k] for k in ("action", "ref", "ref_type", "head", "number") if k in p}
+    for obj in ("pull_request", "issue", "release"):
+        if obj in p:
+            keep[obj] = {k: p[obj][k] for k in ("number", "merged", "tag_name") if k in p[obj]}
+    return {"id": ev.get("id"), "type": ev.get("type"), "created_at": ev.get("created_at"),
+            "repo": {"name": ev.get("repo", {}).get("name")},
+            "actor": {"login": ev.get("actor", {}).get("login")}, "payload": keep}
+
+
 class Client:
     def __init__(self, token: str, cache: dict):
         self.token = token
         self.cache = cache
-        self.stats = {"api_calls": 0, "not_modified": 0, "retries": 0}
+        self.max_attempts = env_int("RATE_LIMIT_MAX_RETRIES", 4)
+        self.max_wait = env_int("RATE_LIMIT_MAX_WAIT", 60)
+        self.floor = env_int("RATE_LIMIT_FLOOR", 50)
+        self.remaining: int | None = None
+        self.stats = {"api_calls": 0, "not_modified": 0, "retries": 0, "served_from_cache": 0}
+
+    def _headers(self, etag=None) -> dict:
+        return {"Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "readme-activity-updater",
+                **({"If-None-Match": etag} if etag else {})}
+
+    def _note_quota(self, headers):
+        value = headers.get("X-RateLimit-Remaining") if headers else None
+        if value and value.isdigit():
+            self.remaining = int(value)
+
+    def get_cached(self, url: str, key: str, shrink=lambda d: d):
+        """GET with ETag revalidation, backoff and a quota floor.
+        The response body is stored (shrunk) in the cache under `key`."""
+        entry = self.cache.get(key, {})
+        if self.remaining is not None and self.remaining < self.floor and "data" in entry:
+            self.stats["served_from_cache"] += 1
+            print(f"::warning::quota {self.remaining} < floor {self.floor}; using cache for {key}")
+            return entry["data"]
+        for attempt in range(1, self.max_attempts + 1):
+            req = urllib.request.Request(url, headers=self._headers(entry.get("etag")))
+            self.stats["api_calls"] += 1
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    self._note_quota(resp.headers)
+                    data = shrink(json.load(resp))
+                    self.cache[key] = {"etag": resp.headers.get("ETag"), "data": data}
+                    return data
+            except urllib.error.HTTPError as err:
+                self._note_quota(err.headers)
+                if err.code == 304:
+                    self.stats["not_modified"] += 1
+                    return entry.get("data", [])
+                retryable = err.code in (429, 500, 502, 503, 504) or (
+                    err.code == 403 and (err.headers.get("Retry-After")
+                                         or err.headers.get("X-RateLimit-Remaining") == "0"))
+                if not retryable or attempt == self.max_attempts:
+                    raise RuntimeError(f"GitHub API {err.code} for {key}") from None
+                delay = backoff_delay(attempt, err.headers)
+                if delay > self.max_wait:
+                    raise RuntimeError(f"rate limited for {int(delay)}s on {key}; giving up") from None
+            except urllib.error.URLError as err:
+                if attempt == self.max_attempts:
+                    raise RuntimeError(f"network error for {key}: {err.reason}") from None
+                delay = backoff_delay(attempt, None)
+            self.stats["retries"] += 1
+            print(f"::warning::retry {attempt} for {key} in {delay:.1f}s")
+            time.sleep(delay)
+        return []
+
+    def get_events(self, repo: str) -> list:
+        return self.get_cached(f"{API}/repos/{repo}/events?per_page=30", f"events:{repo}",
+                               lambda evs: [trim_event(e) for e in evs])
+
+    def list_repos(self, owner: str, limit: int) -> list:
+        """Public, non-fork, non-archived repos of a user or organisation,
+        most recently pushed first."""
+        repos = self.get_cached(
+            f"{API}/users/{owner}/repos?sort=pushed&per_page=30", f"repos:{owner}",
+            lambda rs: [r["full_name"] for r in rs if not r.get("fork") and not r.get("archived")])
+        return repos[:limit]
 
     def pr_merged(self, repo: str, number) -> bool:
         """The Events API no longer says whether a closed PR was merged, so ask
         the Pulls API once per PR and remember the answer in the cache."""
         key = f"pr:{repo}#{number}"
         if key not in self.cache:
-            req = urllib.request.Request(f"{API}/repos/{repo}/pulls/{number}", headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self.token}",
-                "User-Agent": "readme-activity-updater"})
+            req = urllib.request.Request(f"{API}/repos/{repo}/pulls/{number}", headers=self._headers())
             self.stats["api_calls"] += 1
             try:
                 with urllib.request.urlopen(req, timeout=20) as resp:
@@ -99,43 +190,14 @@ class Client:
                 return False  # unknown: render as "Closed", don't cache
         return self.cache[key]
 
-    def get_events(self, repo: str) -> list:
-        url = f"{API}/repos/{repo}/events?per_page=30"
-        entry = self.cache.get(repo, {})
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            req = urllib.request.Request(url, headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self.token}",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "readme-activity-updater",
-                **({"If-None-Match": entry["etag"]} if entry.get("etag") else {}),
-            })
-            self.stats["api_calls"] += 1
-            try:
-                with urllib.request.urlopen(req, timeout=20) as resp:
-                    events = json.load(resp)
-                    self.cache[repo] = {"etag": resp.headers.get("ETag"), "events": events}
-                    return events
-            except urllib.error.HTTPError as err:
-                if err.code == 304:
-                    self.stats["not_modified"] += 1
-                    return entry.get("events", [])
-                retryable = err.code in (429, 500, 502, 503, 504) or (
-                    err.code == 403 and (err.headers.get("Retry-After")
-                                         or err.headers.get("X-RateLimit-Remaining") == "0"))
-                if not retryable or attempt == MAX_ATTEMPTS:
-                    raise RuntimeError(f"GitHub API {err.code} for /repos/{repo}/events") from None
-                delay = backoff_delay(attempt, err.headers)
-                if delay > MAX_RESET_WAIT:
-                    raise RuntimeError(f"rate limited for {int(delay)}s on {repo}; giving up") from None
-            except urllib.error.URLError as err:
-                if attempt == MAX_ATTEMPTS:
-                    raise RuntimeError(f"network error for {repo}: {err.reason}") from None
-                delay = backoff_delay(attempt, None)
-            self.stats["retries"] += 1
-            print(f"::warning::retry {attempt} for {repo} in {delay:.1f}s")
-            time.sleep(delay)
-        return []
+
+def expand_repos(spec: list[str], client: Client, limit: int) -> list[str]:
+    """Turn "owner/*" entries into concrete repos; keep order, drop duplicates."""
+    out: list[str] = []
+    for item in spec:
+        names = client.list_repos(item[:-2], limit) if item.endswith("/*") else [item]
+        out.extend(n for n in names if n not in out)
+    return out
 
 
 # ---------------------------------------------------------------- render ---
@@ -195,11 +257,11 @@ def format_event(ev: dict, merged=lambda repo, n: False) -> str | None:
 
 def render(events: list, max_items: int, user: str | None, merged=lambda r, n: False) -> str:
     seen, lines = set(), []
-    for ev in sorted(events, key=lambda e: e.get("created_at", ""), reverse=True):
+    for ev in sorted(events, key=lambda e: e.get("created_at") or "", reverse=True):
         if ev.get("id") in seen:
             continue
         seen.add(ev.get("id"))
-        if user and ev.get("actor", {}).get("login", "").lower() != user.lower():
+        if user and (ev.get("actor", {}).get("login") or "").lower() != user.lower():
             continue
         line = format_event(ev, merged)
         if line:
@@ -246,15 +308,21 @@ def main(argv=None) -> int:
     if not token:
         print("::error::GITHUB_TOKEN is not set")
         return 1
-    repos = [r.strip() for r in os.environ.get(
-        "ACTIVITY_REPOS", os.environ.get("GITHUB_REPOSITORY", "")).split(",") if r.strip()]
-    if not repos:
+    spec = [r.strip() for r in (os.environ.get("ACTIVITY_REPOS")
+                                or os.environ.get("GITHUB_REPOSITORY", "")).split(",") if r.strip()]
+    if not spec:
         print("::error::no repositories configured (ACTIVITY_REPOS)")
         return 1
 
     cache_path = Path(os.environ.get("CACHE_PATH", ".cache/activity.json"))
     cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
     client = Client(token, cache)
+
+    try:
+        repos = expand_repos(spec, client, env_int("ACTIVITY_REPO_LIMIT", 5))
+    except RuntimeError as e:
+        print(f"::error::could not list repositories: {e}")
+        return 1
 
     events, failed = [], []
     for repo in repos:
@@ -263,24 +331,27 @@ def main(argv=None) -> int:
         except RuntimeError as e:
             failed.append(repo)
             print(f"::warning::{e}")
-    if failed and len(failed) == len(repos):
+    if not repos or len(failed) == len(repos):
         print("::error::all repositories failed; README left unchanged")
         return 1
 
-    body = render(events, int(os.environ.get("MAX_ITEMS", "10")),
+    body = render(events, env_int("MAX_ITEMS", 10),
                   os.environ.get("ACTIVITY_USER") or None, client.pr_merged)
     new_text = replace_section(text, body)
     changed = current_section(new_text) != current_section(text)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(cache), encoding="utf-8")
+    cache_path.write_text(json.dumps(cache, indent=1, sort_keys=True, ensure_ascii=False) + "\n",
+                          encoding="utf-8")
 
     s = client.stats
-    report = (f"| repos | API calls | 304 Not Modified | retries | changed |\n"
-              f"|---|---|---|---|---|\n"
-              f"| {len(repos)} | {s['api_calls']} | {s['not_modified']} | {s['retries']} | {changed} |")
+    quota = "?" if client.remaining is None else client.remaining
+    report = (f"| repos | API calls | 304 Not Modified | retries | from cache | quota left | changed |\n"
+              f"|---|---|---|---|---|---|---|\n"
+              f"| {len(repos)} | {s['api_calls']} | {s['not_modified']} | {s['retries']} "
+              f"| {s['served_from_cache']} | {quota} | {changed} |")
     print(report)
-    summary("### README activity update\n\n" + report)
+    summary("### README activity update\n\n" + report + "\n\nRepos: " + ", ".join(repos))
     write_outputs(changed=str(changed).lower(), **s)
 
     if args.dry_run:
