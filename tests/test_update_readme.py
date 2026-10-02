@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import sys
@@ -20,7 +21,18 @@ def headers(**kv):
     return m
 
 
-class TestMarkers(unittest.TestCase):
+class Quiet(unittest.TestCase):
+    """Swallow the script's ::error/::warning lines so expected failures inside
+    tests don't show up as red annotations on the GitHub Actions run."""
+    def setUp(self):
+        self._quiet = contextlib.redirect_stdout(io.StringIO())
+        self._quiet.__enter__()
+
+    def tearDown(self):
+        self._quiet.__exit__(None, None, None)
+
+
+class TestMarkers(Quiet):
     def test_replace_is_idempotent(self):
         once = ur.replace_section(TEMPLATE, "1. a")
         twice = ur.replace_section(once, "1. a")
@@ -40,15 +52,39 @@ class TestMarkers(unittest.TestCase):
             ur.replace_section(f"{ur.END}\n{ur.START}", "x")
 
 
-class TestRender(unittest.TestCase):
+class TestRender(Quiet):
     def ev(self, i, t, payload, ts, actor="me"):
         return {"id": str(i), "type": t, "payload": payload, "created_at": ts,
                 "repo": {"name": "o/r"}, "actor": {"login": actor}}
 
     def test_merged_pr(self):
         line = ur.format_event(self.ev(1, "PullRequestEvent", {
-            "action": "closed", "pull_request": {"number": 5, "merged": True, "html_url": "u"}}, "t"))
-        self.assertTrue(line.startswith("🔀 Merged [PR #5]"))
+            "action": "closed", "pull_request": {"number": 5, "merged": True}}, "t"))
+        self.assertEqual(line.split(" in ")[0], "🔀 Merged [PR #5](https://github.com/o/r/pull/5)")
+
+    def test_merged_pr_lookup_when_payload_is_slim(self):
+        ev = self.ev(1, "PullRequestEvent", {"action": "closed", "number": 7}, "t")
+        self.assertIn("Merged [PR #7]", ur.format_event(ev, lambda repo, n: True))
+        self.assertIn("Closed [PR #7]", ur.format_event(ev))
+
+    def test_noise_actions_skipped(self):
+        for t, p in (("IssuesEvent", {"action": "assigned", "issue": {"number": 1}}),
+                     ("PullRequestEvent", {"action": "labeled", "number": 2})):
+            self.assertIsNone(ur.format_event(self.ev(1, t, p, "t")))
+
+    def test_push_links_head_commit(self):
+        line = ur.format_event(self.ev(1, "PushEvent", {"ref": "refs/heads/main", "head": "abcdef1234"}, "t"))
+        self.assertIn("[`abcdef1`](https://github.com/o/r/commit/abcdef1234)", line)
+
+    def test_pr_merged_is_cached(self):
+        ok = mock.MagicMock()
+        ok.__enter__.return_value = ok
+        with mock.patch("urllib.request.urlopen", return_value=ok) as up, \
+             mock.patch("json.load", return_value={"merged_at": "2026-10-02"}):
+            c = ur.Client("t", {})
+            self.assertTrue(c.pr_merged("o/r", 2))
+            self.assertTrue(c.pr_merged("o/r", 2))
+        self.assertEqual(up.call_count, 1)
 
     def test_sort_dedupe_limit_and_user_filter(self):
         evs = [self.ev(1, "WatchEvent", {}, "2026-01-01"),
@@ -64,7 +100,7 @@ class TestRender(unittest.TestCase):
         self.assertIsNone(ur.format_event(self.ev(1, "GollumEvent", {}, "t")))
 
 
-class TestBackoff(unittest.TestCase):
+class TestBackoff(Quiet):
     def test_retry_after_header_wins(self):
         self.assertEqual(ur.backoff_delay(1, headers(Retry_After="7")), 7.0)
 
@@ -102,7 +138,7 @@ class TestBackoff(unittest.TestCase):
         self.assertNotIn("SECRET123", str(ctx.exception))
 
 
-class TestMain(unittest.TestCase):
+class TestMain(Quiet):
     def test_check_mode(self):
         import tempfile, os
         with tempfile.TemporaryDirectory() as d:
