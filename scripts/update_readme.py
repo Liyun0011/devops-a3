@@ -82,6 +82,23 @@ class Client:
         self.cache = cache
         self.stats = {"api_calls": 0, "not_modified": 0, "retries": 0}
 
+    def pr_merged(self, repo: str, number) -> bool:
+        """The Events API no longer says whether a closed PR was merged, so ask
+        the Pulls API once per PR and remember the answer in the cache."""
+        key = f"pr:{repo}#{number}"
+        if key not in self.cache:
+            req = urllib.request.Request(f"{API}/repos/{repo}/pulls/{number}", headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.token}",
+                "User-Agent": "readme-activity-updater"})
+            self.stats["api_calls"] += 1
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    self.cache[key] = bool(json.load(resp).get("merged_at"))
+            except (urllib.error.URLError, ValueError):
+                return False  # unknown: render as "Closed", don't cache
+        return self.cache[key]
+
     def get_events(self, repo: str) -> list:
         url = f"{API}/repos/{repo}/events?per_page=30"
         entry = self.cache.get(repo, {})
@@ -126,28 +143,40 @@ def link(repo: str) -> str:
     return f"[{repo}](https://github.com/{repo})"
 
 
-def format_event(ev: dict) -> str | None:
+# Only actions worth showing; noise such as assigned/labeled is skipped.
+PR_ACTIONS = {"opened", "closed", "reopened"}
+ISSUE_ACTIONS = {"opened", "closed", "reopened"}
+
+
+def format_event(ev: dict, merged=lambda repo, n: False) -> str | None:
     t, p, repo = ev.get("type"), ev.get("payload", {}), ev.get("repo", {}).get("name", "?")
-    r = link(repo)
+    r, base = link(repo), f"https://github.com/{repo}"
     if t == "PushEvent":
         ref = p.get("ref", "").removeprefix("refs/heads/")
-        n = p.get("size") or len(p.get("commits", []) or [])
-        what = f"{n} commit{'s' if n != 1 else ''}" if n else "commits"
-        return f"📝 Pushed {what} to `{ref}` in {r}"
+        head = (p.get("head") or "")[:7]
+        sha = f" ([`{head}`]({base}/commit/{p['head']}))" if head else ""
+        return f"📝 Pushed to `{ref}`{sha} in {r}"
     if t == "PullRequestEvent":
-        pr = p.get("pull_request", {})
-        num, url = pr.get("number", p.get("number")), pr.get("html_url", f"https://github.com/{repo}/pulls")
-        action = "Merged" if p.get("action") == "closed" and pr.get("merged") else p.get("action", "").capitalize()
-        icon = {"Merged": "🔀", "Opened": "📥", "Closed": "🚫"}.get(action, "🔃")
-        return f"{icon} {action} [PR #{num}]({url}) in {r}"
-    if t == "IssuesEvent":
-        iss = p.get("issue", {})
         action = p.get("action", "")
-        icon = {"opened": "🆕", "closed": "✅", "reopened": "🔁"}.get(action, "📌")
-        return f"{icon} {action.capitalize()} issue [#{iss.get('number')}]({iss.get('html_url')}) in {r}"
+        if action not in PR_ACTIONS:
+            return None
+        pr = p.get("pull_request", {})
+        num = pr.get("number", p.get("number"))
+        if action == "closed":
+            is_merged = pr["merged"] if "merged" in pr else merged(repo, num)
+            action = "merged" if is_merged else "closed"
+        icon = {"merged": "🔀", "opened": "📥", "closed": "🚫", "reopened": "🔁"}[action]
+        return f"{icon} {action.capitalize()} [PR #{num}]({base}/pull/{num}) in {r}"
+    if t == "IssuesEvent":
+        action = p.get("action", "")
+        if action not in ISSUE_ACTIONS:
+            return None
+        num = p.get("issue", {}).get("number")
+        icon = {"opened": "🆕", "closed": "✅", "reopened": "🔁"}[action]
+        return f"{icon} {action.capitalize()} issue [#{num}]({base}/issues/{num}) in {r}"
     if t == "IssueCommentEvent":
-        iss = p.get("issue", {})
-        return f"💬 Commented on [#{iss.get('number')}]({p.get('comment', {}).get('html_url')}) in {r}"
+        num = p.get("issue", {}).get("number")
+        return f"💬 Commented on [#{num}]({base}/issues/{num}) in {r}"
     if t in ("CreateEvent", "DeleteEvent"):
         kind = p.get("ref_type", "")
         if kind == "repository":
@@ -155,8 +184,8 @@ def format_event(ev: dict) -> str | None:
         verb, icon = ("Created", "➕") if t == "CreateEvent" else ("Deleted", "🗑️")
         return f"{icon} {verb} {kind} `{p.get('ref')}` in {r}"
     if t == "ReleaseEvent":
-        rel = p.get("release", {})
-        return f"🚀 Released [{rel.get('tag_name')}]({rel.get('html_url')}) in {r}"
+        tag = p.get("release", {}).get("tag_name")
+        return f"🚀 Released [{tag}]({base}/releases/tag/{tag}) in {r}"
     if t == "WatchEvent":
         return f"⭐ Starred {r}"
     if t == "ForkEvent":
@@ -164,7 +193,7 @@ def format_event(ev: dict) -> str | None:
     return None  # unknown types are skipped rather than rendered badly
 
 
-def render(events: list, max_items: int, user: str | None) -> str:
+def render(events: list, max_items: int, user: str | None, merged=lambda r, n: False) -> str:
     seen, lines = set(), []
     for ev in sorted(events, key=lambda e: e.get("created_at", ""), reverse=True):
         if ev.get("id") in seen:
@@ -172,7 +201,7 @@ def render(events: list, max_items: int, user: str | None) -> str:
         seen.add(ev.get("id"))
         if user and ev.get("actor", {}).get("login", "").lower() != user.lower():
             continue
-        line = format_event(ev)
+        line = format_event(ev, merged)
         if line:
             lines.append(f"{len(lines) + 1}. {line}")
         if len(lines) >= max_items:
@@ -239,7 +268,7 @@ def main(argv=None) -> int:
         return 1
 
     body = render(events, int(os.environ.get("MAX_ITEMS", "10")),
-                  os.environ.get("ACTIVITY_USER") or None)
+                  os.environ.get("ACTIVITY_USER") or None, client.pr_merged)
     new_text = replace_section(text, body)
     changed = current_section(new_text) != current_section(text)
 
