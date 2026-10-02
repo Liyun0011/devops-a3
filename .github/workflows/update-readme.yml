@@ -1,0 +1,61 @@
+# Updates the "Recent Activities" section of README.md.
+# Triggers: manual (workflow_dispatch) + every 6 hours (schedule).
+# Deliberately NOT triggered on push, so the bot's own commit can never loop.
+name: Update README Activity
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_items:
+        description: "Number of activity lines"
+        default: "10"
+  schedule:
+    - cron: "17 */6 * * *"   # off the hour to avoid the :00 rush (UTC)
+
+permissions:
+  contents: write            # the only permission this job needs
+
+concurrency:
+  group: update-readme       # never two writers at once
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.REPO_TOKEN }}
+
+      - name: Restore ETag cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache
+          key: activity-cache-${{ github.run_id }}
+          restore-keys: activity-cache-
+
+      - name: Validate markers
+        run: python3 scripts/update_readme.py --check
+
+      - name: Render activity
+        id: render
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_TOKEN }}
+          ACTIVITY_REPOS: ${{ vars.ACTIVITY_REPOS || github.repository }}
+          ACTIVITY_USER: ${{ vars.ACTIVITY_USER }}
+          MAX_ITEMS: ${{ inputs.max_items || '10' }}
+        run: python3 scripts/update_readme.py
+
+      - name: Commit if changed
+        if: steps.render.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore(readme): update recent activity"
+          git push
+
+      - name: Nothing to commit
+        if: steps.render.outputs.changed != 'true'
+        run: echo "README already up to date (idempotent run)"
