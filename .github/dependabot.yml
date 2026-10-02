@@ -1,0 +1,8 @@
+# Keeps the SHA-pinned actions up to date: Dependabot opens a PR that bumps
+# both the SHA and the "# vX.Y.Z" comment, so pinning does not mean "frozen".
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
