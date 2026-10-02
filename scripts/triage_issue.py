@@ -61,12 +61,25 @@ def clean(text, limit: int) -> str:
     return text[:limit].rstrip() + ("…" if len(text) > limit else "")
 
 
+def extract_json(content: str) -> dict:
+    """Return the first JSON object in the reply, tolerating code fences or
+    prose around it (models sometimes add them despite instructions)."""
+    text = content or ""
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == "{":
+            try:
+                obj, _ = decoder.raw_decode(text[i:])
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                return obj
+    raise ValueError("model reply contained no JSON object")
+
+
 def parse_reply(content: str) -> dict:
     """Validate the model's answer against the allowlists."""
-    match = re.search(r"\{.*\}", content or "", re.S)
-    if not match:
-        raise ValueError("model reply contained no JSON object")
-    data = json.loads(match.group(0))
+    data = extract_json(content)
     kind = str(data.get("type", "")).lower()
     prio = str(data.get("priority", "")).lower()
     criteria = data.get("acceptance_criteria") or []
@@ -131,7 +144,8 @@ class GitHub:
 
     def ask_model(self, url: str, model: str, messages: list[dict]) -> str:
         reply = self.request("POST", url, {"model": model, "messages": messages,
-                                           "temperature": 0.2, "max_tokens": 400})
+                                           "temperature": 0.2, "max_tokens": 400,
+                                           "response_format": {"type": "json_object"}})
         return reply["choices"][0]["message"]["content"]
 
 
@@ -166,15 +180,26 @@ def main(argv=None) -> int:
         data = gh.issue(number)
         title, body = data.get("title", ""), data.get("body") or ""
 
+    stage, content = "model call", ""
     try:
-        result = parse_reply(gh.ask_model(url, model, build_messages(title, body)))
-    except (urllib.error.URLError, KeyError, IndexError, ValueError) as err:
+        content = gh.ask_model(url, model, build_messages(title, body))
+        stage = "reply parsing"
+        result = parse_reply(content)
+    except (urllib.error.URLError, KeyError, IndexError, TypeError, ValueError) as err:
         reason = getattr(err, "code", None) or type(err).__name__
-        print(f"::warning::model triage failed ({reason}); labelling {FALLBACK_LABEL}")
+        detail = ""
+        if isinstance(err, urllib.error.HTTPError):
+            try:  # the API's own error message (never contains the token)
+                detail = clean(err.read().decode("utf-8", "replace"), 300)
+            except Exception:
+                pass
+        elif content:
+            detail = "reply was: " + clean(content, 200)
+        print(f"::warning::{stage} failed ({reason}) {detail}; labelling {FALLBACK_LABEL}")
         if not args.dry_run:
             gh.ensure_label(FALLBACK_LABEL, "ededed")
             gh.add_labels(number, [FALLBACK_LABEL])
-        summary(f"### Issue #{number}: model unavailable ({reason}) → `{FALLBACK_LABEL}`")
+        summary(f"### Issue #{number}: {stage} failed ({reason}) → `{FALLBACK_LABEL}`\n\n{detail}")
         return 0
 
     labels, comment = labels_for(result), render_comment(result, model)
