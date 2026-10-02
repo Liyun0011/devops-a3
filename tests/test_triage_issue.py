@@ -78,15 +78,15 @@ class TestParsing(Quiet):
 
 
 class TestMain(Quiet):
-    ENV = {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r", "ISSUE_NUMBER": "5",
+    ENV = {"GITHUB_TOKEN": "t", "LLM_API_KEY": "k", "GITHUB_REPOSITORY": "o/r", "ISSUE_NUMBER": "5",
            "ISSUE_TITLE": "Badge broken", "ISSUE_BODY": "details"}
 
     def test_happy_path_labels_and_comments(self):
         calls = []
 
-        def fake(self, method, url, payload=None):
+        def fake(self, method, url, payload=None, token=None):
             calls.append((method, url.split("/repos/o/r")[-1], payload))
-            if "models" in url:
+            if "chat/completions" in url:
                 return {"choices": [{"message": {"content": GOOD}}]}
             return {}
         with mock.patch.dict(os.environ, self.ENV), mock.patch.object(ti.GitHub, "request", fake):
@@ -100,8 +100,8 @@ class TestMain(Quiet):
     def test_model_failure_falls_back_to_needs_triage(self):
         added = []
 
-        def fake(self, method, url, payload=None):
-            if "models" in url:
+        def fake(self, method, url, payload=None, token=None):
+            if "chat/completions" in url:
                 raise urllib.error.HTTPError(url, 403, "no models", Message(), io.BytesIO())
             if url.endswith("/labels") and "issues" in url:
                 added.extend(payload["labels"])
@@ -113,8 +113,8 @@ class TestMain(Quiet):
     def test_unparseable_reply_is_reported_and_falls_back(self):
         added, out = [], io.StringIO()
 
-        def fake(self, method, url, payload=None):
-            if "models" in url:
+        def fake(self, method, url, payload=None, token=None):
+            if "chat/completions" in url:
                 self_payload.append(payload)
                 return {"choices": [{"message": {"content": "Sorry, I cannot help."}}]}
             if url.endswith("/labels") and "issues" in url:
@@ -129,36 +129,51 @@ class TestMain(Quiet):
         self.assertIn("Sorry, I cannot help.", out.getvalue())
         self.assertEqual(self_payload[0]["response_format"], {"type": "json_object"})
 
-    def test_non_json_body_is_described_and_legacy_endpoint_is_tried(self):
+    def test_non_json_body_is_described(self):
         class Resp(io.BytesIO):
             status = 200
-            headers = {"Content-Type": "text/html"}
+            headers = {"Content-Type": "text/plain"}
             def geturl(self):
-                return "https://example.test/login"
-        tried = []
+                return "https://retired.example/chat/completions"
+        with mock.patch("urllib.request.urlopen", return_value=Resp(b"OK")):
+            with self.assertRaises(ti.BadResponse) as ctx:
+                ti.GitHub("t", "o/r").ask_model(ti.DEFAULT_URL, "m", [], "k")
+        self.assertIn("text/plain", ti.describe(ctx.exception))
+
+    def test_key_used_for_model_and_400_retries_without_json_mode(self):
+        seen = []
 
         def fake_urlopen(req, timeout=0):
-            tried.append(req.full_url)
-            if "azure" in req.full_url:
-                body = json.dumps({"choices": [{"message": {"content": GOOD}}]}).encode()
-                r = Resp(body); r.headers = {"Content-Type": "application/json"}
-                return r
-            return Resp(b"<html>Sign in</html>")
-        gh = ti.GitHub("t", "o/r")
+            body = json.loads(req.data)
+            seen.append((req.get_header("Authorization"), "response_format" in body))
+            if "response_format" in body:
+                raise urllib.error.HTTPError(req.full_url, 400, "bad", Message(), io.BytesIO(b"unknown field"))
+            r = io.BytesIO(json.dumps({"choices": [{"message": {"content": GOOD}}]}).encode())
+            return r
         with mock.patch("urllib.request.urlopen", fake_urlopen):
-            content = gh.ask_model(ti.DEFAULT_URL, "openai/gpt-4o-mini", [])
+            content = ti.GitHub("gh-token", "o/r").ask_model(ti.DEFAULT_URL, "m", [], "llm-key")
         self.assertEqual(ti.parse_reply(content)["type"], "bug")
-        self.assertEqual(len(tried), 2)
-        err = ti.BadResponse("HTTP 200 text/html from x: <html>")
-        self.assertIn("text/html", ti.describe(err))
+        self.assertEqual(seen, [("Bearer llm-key", True), ("Bearer llm-key", False)])
+
+    def test_missing_key_falls_back(self):
+        added = []
+
+        def fake(self, method, url, payload=None, token=None):
+            if url.endswith("/labels") and "issues" in url:
+                added.extend(payload["labels"])
+            return {}
+        with mock.patch.dict(os.environ, dict(self.ENV, LLM_API_KEY="")), \
+             mock.patch.object(ti.GitHub, "request", fake):
+            self.assertEqual(ti.main([]), 0)
+        self.assertEqual(added, ["needs-triage"])
 
     def test_dry_run_fetches_issue_and_writes_nothing(self):
         writes = []
 
-        def fake(self, method, url, payload=None):
+        def fake(self, method, url, payload=None, token=None):
             if method == "GET":
                 return {"title": "From API", "body": None}
-            if "models" in url:
+            if "chat/completions" in url:
                 return {"choices": [{"message": {"content": GOOD}}]}
             writes.append(url)
         env = dict(self.ENV, ISSUE_TITLE="", ISSUE_BODY="")
@@ -167,7 +182,7 @@ class TestMain(Quiet):
         self.assertEqual(writes, [])
 
     def test_existing_label_is_fine(self):
-        def fake(self, method, url, payload=None):
+        def fake(self, method, url, payload=None, token=None):
             raise urllib.error.HTTPError(url, 422, "exists", Message(), io.BytesIO())
         with mock.patch.object(ti.GitHub, "request", fake):
             ti.GitHub("t", "o/r").ensure_label("x", "ffffff")  # no exception
