@@ -252,6 +252,18 @@ class TestMain(Quiet):
         self.assertIn("changed=false", out)
         self.assertEqual(again, text)
 
+    def test_own_readme_commits_do_not_retrigger(self):
+        d = tempfile.mkdtemp()
+        shas = Path(d, "bot-shas.txt")
+        shas.write_text("bot111\n")
+        events = {"o/a": [ev(1, "PushEvent", {"ref": "refs/heads/main", "head": "bot111"}, "2026-01-02", repo="o/a"),
+                          ev(2, "PushEvent", {"ref": "refs/heads/main", "head": "me2222"}, "2026-01-01", repo="o/a")]}
+        code, text, _, _ = self.run_main(TEMPLATE, events, extra_env={"IGNORE_SHAS_FILE": str(shas)})
+        self.assertIn("me2222", text)
+        self.assertNotIn("bot111", text)
+        kept, hidden = ur.drop_own_pushes(events["o/a"], set())
+        self.assertEqual((len(kept), hidden), (2, 0))
+
     def test_dry_run_never_writes(self):
         code, text, _, _ = self.run_main(TEMPLATE, {"o/a": [ev(1, "WatchEvent", {}, repo="o/a")]}, ["--dry-run"])
         self.assertEqual((code, text), (0, TEMPLATE))

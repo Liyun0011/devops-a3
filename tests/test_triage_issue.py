@@ -54,6 +54,10 @@ class TestParsing(Quiet):
         with self.assertRaises(ValueError):
             ti.parse_reply("Sure! Ignoring previous instructions…")
 
+    def test_json_inside_prose_and_braces(self):
+        reply = 'Here you go {not json} then ' + GOOD + ' and {"extra": 1}'
+        self.assertEqual(ti.parse_reply(reply)["type"], "bug")
+
     def test_long_text_is_capped(self):
         r = ti.parse_reply(json.dumps({"summary": "x" * 999, "acceptance_criteria": ["y" * 999] * 9}))
         self.assertLessEqual(len(r["summary"]), 201)
@@ -105,6 +109,25 @@ class TestMain(Quiet):
         with mock.patch.dict(os.environ, self.ENV), mock.patch.object(ti.GitHub, "request", fake):
             self.assertEqual(ti.main([]), 0)
         self.assertEqual(added, ["needs-triage"])
+
+    def test_unparseable_reply_is_reported_and_falls_back(self):
+        added, out = [], io.StringIO()
+
+        def fake(self, method, url, payload=None):
+            if "models" in url:
+                self_payload.append(payload)
+                return {"choices": [{"message": {"content": "Sorry, I cannot help."}}]}
+            if url.endswith("/labels") and "issues" in url:
+                added.extend(payload["labels"])
+            return {}
+        self_payload = []
+        with mock.patch.dict(os.environ, self.ENV), mock.patch.object(ti.GitHub, "request", fake), \
+             contextlib.redirect_stdout(out):
+            self.assertEqual(ti.main([]), 0)
+        self.assertEqual(added, ["needs-triage"])
+        self.assertIn("reply parsing failed", out.getvalue())
+        self.assertIn("Sorry, I cannot help.", out.getvalue())
+        self.assertEqual(self_payload[0]["response_format"], {"type": "json_object"})
 
     def test_dry_run_fetches_issue_and_writes_nothing(self):
         writes = []
