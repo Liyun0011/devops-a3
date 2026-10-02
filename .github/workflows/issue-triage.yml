@@ -39,4 +39,5 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           TRIAGE_MODEL: ${{ vars.TRIAGE_MODEL }}
+          TRIAGE_MAX_TOKENS: ${{ vars.TRIAGE_MAX_TOKENS }}
         run: python3 scripts/triage_issue.py
