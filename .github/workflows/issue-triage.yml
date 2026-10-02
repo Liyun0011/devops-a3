@@ -1,0 +1,41 @@
+# Agentic automation: when an issue is opened, a model on GitHub Models
+# classifies it, the job applies allowlisted labels and comments a summary
+# plus draft acceptance criteria. Issue text reaches the script only through
+# env variables (never ${{ }} inside run:), which prevents script injection.
+name: AI Issue Triage
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to (re-)triage"
+        required: true
+
+permissions:
+  contents: read
+  issues: write      # labels + comment
+  models: read       # GitHub Models inference, no extra secret needed
+
+concurrency:
+  group: triage-${{ github.event.issue.number || inputs.issue_number }}
+
+jobs:
+  triage:
+    # only issues from people with write access, so strangers cannot spend the model quota
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Triage with GitHub Models
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          TRIAGE_MODEL: ${{ vars.TRIAGE_MODEL || 'openai/gpt-4o-mini' }}
+        run: python3 scripts/triage_issue.py

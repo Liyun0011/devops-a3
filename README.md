@@ -2,6 +2,8 @@
 
 [![Update README Activity](https://github.com/Liyun0011/devops-a3/actions/workflows/update-readme.yml/badge.svg)](https://github.com/Liyun0011/devops-a3/actions/workflows/update-readme.yml)
 [![README CI](https://github.com/Liyun0011/devops-a3/actions/workflows/readme-ci.yml/badge.svg)](https://github.com/Liyun0011/devops-a3/actions/workflows/readme-ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Liyun0011/devops-a3/main/badges/coverage.json)](https://github.com/Liyun0011/devops-a3/actions/workflows/readme-ci.yml)
+[![AI Issue Triage](https://github.com/Liyun0011/devops-a3/actions/workflows/issue-triage.yml/badge.svg)](https://github.com/Liyun0011/devops-a3/actions/workflows/issue-triage.yml)
 
 ### Recent Activities
 <!--START_SECTION:activity-->
