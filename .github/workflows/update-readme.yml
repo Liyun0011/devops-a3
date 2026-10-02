@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.REPO_TOKEN }}
+          fetch-depth: 50          # enough history to recognise the bot's own commits
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -35,9 +36,13 @@ jobs:
       - name: Validate markers
         run: python scripts/update_readme.py --check
 
+      - name: List the bot's own commits  # hidden from the activity list (no self-feeding loop)
+        run: git log -n 50 --author='github-actions\[bot\]' --format=%H > "$RUNNER_TEMP/bot-shas.txt"
+
       - name: Render activity            # ETag cache lives in .cache/activity.json (committed)
         id: render
         env:
+          IGNORE_SHAS_FILE: ${{ runner.temp }}/bot-shas.txt
           GITHUB_TOKEN: ${{ secrets.REPO_TOKEN }}
           ACTIVITY_REPOS: ${{ vars.ACTIVITY_REPOS || github.repository }}
           ACTIVITY_REPO_LIMIT: ${{ vars.ACTIVITY_REPO_LIMIT || '5' }}

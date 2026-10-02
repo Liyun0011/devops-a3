@@ -30,6 +30,10 @@ Environment
   RATE_LIMIT_MAX_WAIT     longest sleep in seconds for a reset (default 60)
   RATE_LIMIT_FLOOR        stop calling the API below this many remaining
                           requests and serve cached data (default 50)
+  IGNORE_SHAS_FILE        file with one commit SHA per line; pushes whose head
+                          is listed (the workflow's own README commits) are
+                          hidden, otherwise every update would create the
+                          activity that triggers the next update
 """
 from __future__ import annotations
 
@@ -191,6 +195,19 @@ class Client:
         return self.cache[key]
 
 
+def load_ignored_shas() -> set[str]:
+    path = os.environ.get("IGNORE_SHAS_FILE")
+    if not path or not Path(path).exists():
+        return set()
+    return {line.strip() for line in Path(path).read_text().splitlines() if line.strip()}
+
+
+def drop_own_pushes(events: list, shas: set[str]) -> tuple[list, int]:
+    kept = [e for e in events
+            if not (e.get("type") == "PushEvent" and e.get("payload", {}).get("head") in shas)]
+    return kept, len(events) - len(kept)
+
+
 def expand_repos(spec: list[str], client: Client, limit: int) -> list[str]:
     """Turn "owner/*" entries into concrete repos; keep order, drop duplicates."""
     out: list[str] = []
@@ -335,6 +352,7 @@ def main(argv=None) -> int:
         print("::error::all repositories failed; README left unchanged")
         return 1
 
+    events, hidden = drop_own_pushes(events, load_ignored_shas())
     body = render(events, env_int("MAX_ITEMS", 10),
                   os.environ.get("ACTIVITY_USER") or None, client.pr_merged)
     new_text = replace_section(text, body)
@@ -351,7 +369,8 @@ def main(argv=None) -> int:
               f"| {len(repos)} | {s['api_calls']} | {s['not_modified']} | {s['retries']} "
               f"| {s['served_from_cache']} | {quota} | {changed} |")
     print(report)
-    summary("### README activity update\n\n" + report + "\n\nRepos: " + ", ".join(repos))
+    summary("### README activity update\n\n" + report + "\n\nRepos: " + ", ".join(repos)
+            + f"\n\nHidden bot pushes: {hidden}")
     write_outputs(changed=str(changed).lower(), **s)
 
     if args.dry_run:
