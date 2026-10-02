@@ -155,6 +155,14 @@ class TestMain(Quiet):
         self.assertEqual(ti.parse_reply(content)["type"], "bug")
         self.assertEqual(seen, [("Bearer llm-key", True), ("Bearer llm-key", False)])
 
+    def test_truncated_reply_is_reported(self):
+        body = {"choices": [{"finish_reason": "length", "message": {"content": '{ "type": "bug", "priority'}}]}
+        with mock.patch.object(ti.GitHub, "request", lambda *a, **k: body), \
+             mock.patch.dict(os.environ, {"TRIAGE_MAX_TOKENS": "64"}):
+            with self.assertRaises(ValueError) as ctx:
+                ti.GitHub("t", "o/r").ask_model(ti.DEFAULT_URL, "m", [], "k")
+        self.assertIn("max_tokens=64", str(ctx.exception))
+
     def test_missing_key_falls_back(self):
         added = []
 
