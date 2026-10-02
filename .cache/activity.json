@@ -380,6 +380,218 @@
     "actor": {
      "login": "Liyun0011"
     },
+    "created_at": "2026-10-02T17:51:05Z",
+    "id": "22813575158",
+    "payload": {
+     "ref": "5-bots-own-readme-commits-re-trigger-the-next-update",
+     "ref_type": "branch"
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "DeleteEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:50:29Z",
+    "id": "22813531867",
+    "payload": {
+     "head": "65ba2267d537ad8a9c9d22b0b70cfa9d7ae79029",
+     "ref": "refs/heads/main"
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PushEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:50:28Z",
+    "id": "16297450866",
+    "payload": {
+     "action": "merged",
+     "number": 6,
+     "pull_request": {
+      "number": 6
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PullRequestEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:50:29Z",
+    "id": "16297450780",
+    "payload": {
+     "action": "closed",
+     "issue": {
+      "number": 5
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "IssuesEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:48:06Z",
+    "id": "16297299921",
+    "payload": {
+     "action": "opened",
+     "number": 6,
+     "pull_request": {
+      "number": 6
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PullRequestEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:48:06Z",
+    "id": "16297299840",
+    "payload": {
+     "action": "assigned",
+     "number": 6,
+     "pull_request": {
+      "number": 6
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PullRequestEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:45:31Z",
+    "id": "22813169962",
+    "payload": {
+     "head": "6ecbe40d543b60e6e5dda061c88463de566ac13b",
+     "ref": "refs/heads/5-bots-own-readme-commits-re-trigger-the-next-update"
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PushEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:43:20Z",
+    "id": "22813008858",
+    "payload": {
+     "ref": "5-bots-own-readme-commits-re-trigger-the-next-update",
+     "ref_type": "branch"
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "CreateEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T05:49:49Z",
+    "id": "22812693224",
+    "payload": {
+     "head": "3fbe2f4e00a3c9158ba008ad5c009b5a8780a902",
+     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PushEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:38:54Z",
+    "id": "16296707330",
+    "payload": {
+     "action": "assigned",
+     "issue": {
+      "number": 5
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "IssuesEvent"
+   },
+   {
+    "actor": {
+     "login": "github-actions[bot]"
+    },
+    "created_at": "2026-10-02T17:38:48Z",
+    "id": "16296700686",
+    "payload": {
+     "action": "labeled",
+     "issue": {
+      "number": 5
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "IssuesEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:38:39Z",
+    "id": "16296691361",
+    "payload": {
+     "action": "opened",
+     "issue": {
+      "number": 5
+     }
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "IssuesEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
+    "created_at": "2026-10-02T17:35:26Z",
+    "id": "22812426801",
+    "payload": {
+     "head": "b370ec947a402554b6a7dc8513fbe2cd7943c9c1",
+     "ref": "refs/heads/main"
+    },
+    "repo": {
+     "name": "Liyun0011/devops-a3"
+    },
+    "type": "PushEvent"
+   },
+   {
+    "actor": {
+     "login": "Liyun0011"
+    },
     "created_at": "2026-10-02T06:20:35Z",
     "id": "22811981530",
     "payload": {
@@ -645,221 +857,15 @@
      "name": "Liyun0011/devops-a3"
     },
     "type": "IssuesEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T06:38:34Z",
-    "id": "22765180609",
-    "payload": {
-     "head": "b995fd6216bcafb6a11d5223f160eef5a9c12f17",
-     "ref": "refs/heads/main"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T06:26:07Z",
-    "id": "22764383695",
-    "payload": {
-     "ref": "1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities",
-     "ref_type": "branch"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "DeleteEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T06:24:15Z",
-    "id": "22764269163",
-    "payload": {
-     "head": "c003d9daee7478b4e343902cbd74f6e7d55a63eb",
-     "ref": "refs/heads/main"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T06:24:14Z",
-    "id": "16254775069",
-    "payload": {
-     "action": "merged",
-     "number": 2,
-     "pull_request": {
-      "number": 2
-     }
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PullRequestEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T06:24:22Z",
-    "id": "16254774550",
-    "payload": {
-     "action": "closed",
-     "issue": {
-      "number": 1
-     }
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "IssuesEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T06:12:49Z",
-    "id": "22763543013",
-    "payload": {
-     "head": "d2edbcec2765595e578c93063aa40055a17d8054",
-     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:53:37Z",
-    "id": "22762332011",
-    "payload": {
-     "head": "f0a622c761de0019d51734f1e71a87bdc3744445",
-     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:49:05Z",
-    "id": "22762055659",
-    "payload": {
-     "head": "62e985ca443ace79f6556fd8c5e6f08b37e36e5d",
-     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:47:35Z",
-    "id": "22761963468",
-    "payload": {
-     "head": "a644e856796204beaa46c8377f48302a33d8ccac",
-     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:37:57Z",
-    "id": "16252756549",
-    "payload": {
-     "action": "assigned",
-     "number": 2,
-     "pull_request": {
-      "number": 2
-     }
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PullRequestEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:37:57Z",
-    "id": "16252754968",
-    "payload": {
-     "action": "opened",
-     "number": 2,
-     "pull_request": {
-      "number": 2
-     }
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PullRequestEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:18:03Z",
-    "id": "22760158308",
-    "payload": {
-     "head": "57127b4948903e600510ad0a10cd59b65e35c789",
-     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
-   },
-   {
-    "actor": {
-     "login": "Liyun0011"
-    },
-    "created_at": "2026-10-02T05:14:35Z",
-    "id": "22759947890",
-    "payload": {
-     "head": "b93555ff38d549b3f6708ab089c909e7867a2add",
-     "ref": "refs/heads/1-as-repo-owner-i-want-readme-to-auto-update-with-recent-activities"
-    },
-    "repo": {
-     "name": "Liyun0011/devops-a3"
-    },
-    "type": "PushEvent"
    }
   ],
-  "etag": "\"eee2d20d41b0f1ebb30b73775156fd346303d559e1a19ef9504091f9ba9c4f04\""
+  "etag": "\"a96b8c433bcf4b86d7555f78f7a044eeb01835967b178df44c3e02cf49bf58ce\""
  },
  "repos:Liyun0011": {
   "data": [
    "Liyun0011/devops-a3",
    "Liyun0011/JiraScrumHW1"
   ],
-  "etag": "\"69355e22a2c25163a81036efa077eebeb251745481269ab10aae0f31aee5e800\""
+  "etag": "\"e9652633110c530880cd1268e1676a87e1799da2d1eb53123cd56f4a71d4ccae\""
  }
 }
