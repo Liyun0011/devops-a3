@@ -34,6 +34,12 @@ API = "https://api.github.com"
 TYPES = {"bug": "d73a4a", "feature": "a2eeef", "docs": "0075ca", "question": "d876e3", "chore": "cfd3d7"}
 PRIORITIES = {"high": "b60205", "medium": "fbca04", "low": "0e8a16"}
 AI_LABEL, FALLBACK_LABEL = "triaged-by-ai", "needs-triage"
+DEFAULT_URL = "https://models.github.ai/inference/chat/completions"
+LEGACY_URL = "https://models.inference.ai.azure.com/chat/completions"  # older GitHub Models endpoint
+
+
+class BadResponse(ValueError):
+    """The API answered 2xx but the body was not JSON."""
 MAX_BODY = 4000
 
 SYSTEM_PROMPT = (
@@ -124,7 +130,14 @@ class GitHub:
             data=None if payload is None else json.dumps(payload).encode())
         with urllib.request.urlopen(req, timeout=60) as resp:
             raw = resp.read()
-            return json.loads(raw) if raw else None
+            if not raw:
+                return None
+            try:
+                return json.loads(raw)
+            except ValueError:
+                ctype = resp.headers.get("Content-Type", "?")
+                snippet = clean(raw[:200].decode("utf-8", "replace"), 200)
+                raise BadResponse(f"HTTP {resp.status} {ctype} from {resp.geturl()}: {snippet}") from None
 
     def issue(self, number):
         return self.request("GET", f"{API}/repos/{self.repo}/issues/{number}")
@@ -143,10 +156,32 @@ class GitHub:
         self.request("POST", f"{API}/repos/{self.repo}/issues/{number}/comments", {"body": body})
 
     def ask_model(self, url: str, model: str, messages: list[dict]) -> str:
-        reply = self.request("POST", url, {"model": model, "messages": messages,
-                                           "temperature": 0.2, "max_tokens": 400,
-                                           "response_format": {"type": "json_object"}})
-        return reply["choices"][0]["message"]["content"]
+        """Call the configured endpoint; if it fails and is the default one,
+        retry once on the legacy endpoint (which names models without the
+        publisher prefix, e.g. gpt-4o-mini)."""
+        attempts = [(url, model)]
+        if url == DEFAULT_URL:
+            attempts.append((LEGACY_URL, model.split("/", 1)[-1]))
+        errors = []
+        for endpoint, name in attempts:
+            try:
+                reply = self.request("POST", endpoint, {
+                    "model": name, "messages": messages, "temperature": 0.2, "max_tokens": 400,
+                    "response_format": {"type": "json_object"}})
+                return reply["choices"][0]["message"]["content"]
+            except (urllib.error.URLError, KeyError, IndexError, TypeError, ValueError) as err:
+                errors.append(err)
+                print(f"::notice::{endpoint} failed: {describe(err)}")
+        raise errors[-1]
+
+
+def describe(err) -> str:
+    if isinstance(err, urllib.error.HTTPError):
+        try:  # the API's own error message (never contains the token)
+            return f"HTTP {err.code}: " + clean(err.read().decode("utf-8", "replace"), 300)
+        except Exception:
+            return f"HTTP {err.code}"
+    return clean(f"{type(err).__name__}: {err}", 300)
 
 
 def label_color(label: str) -> str:
@@ -172,7 +207,7 @@ def main(argv=None) -> int:
         print("::error::GITHUB_TOKEN, GITHUB_REPOSITORY and a numeric ISSUE_NUMBER are required")
         return 1
     model = os.environ.get("TRIAGE_MODEL") or "openai/gpt-4o-mini"
-    url = os.environ.get("MODELS_URL") or "https://models.github.ai/inference/chat/completions"
+    url = os.environ.get("MODELS_URL") or DEFAULT_URL
     gh = GitHub(token, repo)
 
     title, body = os.environ.get("ISSUE_TITLE"), os.environ.get("ISSUE_BODY")
@@ -187,13 +222,8 @@ def main(argv=None) -> int:
         result = parse_reply(content)
     except (urllib.error.URLError, KeyError, IndexError, TypeError, ValueError) as err:
         reason = getattr(err, "code", None) or type(err).__name__
-        detail = ""
-        if isinstance(err, urllib.error.HTTPError):
-            try:  # the API's own error message (never contains the token)
-                detail = clean(err.read().decode("utf-8", "replace"), 300)
-            except Exception:
-                pass
-        elif content:
+        detail = describe(err)
+        if stage == "reply parsing" and content:
             detail = "reply was: " + clean(content, 200)
         print(f"::warning::{stage} failed ({reason}) {detail}; labelling {FALLBACK_LABEL}")
         if not args.dry_run:
